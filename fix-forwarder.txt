@@ -1,0 +1,28 @@
+<#
+.SYNOPSIS
+    Behebt errorCode=5 (Zugriff verweigert) beim Splunk Universal Forwarder,
+    wenn er das Windows Security- oder Sysmon-Event-Log nicht abonnieren kann.
+ 
+.DESCRIPTION
+    Der SplunkForwarder-Dienst braucht ausreichende Rechte, um sicherheitsrelevante
+    Event-Log-Kanäle zu lesen. Für ein Home Lab ist Local System die einfachste
+    Lösung. Als Administrator ausführen.
+ 
+.NOTES
+    Teil des SOC Home Lab Projekts, Teil 1.
+#>
+ 
+Write-Host "Stelle SplunkForwarder-Dienst auf Local System um..." -ForegroundColor Cyan
+sc.exe config SplunkForwarder obj= LocalSystem
+ 
+Write-Host "Starte Dienst neu..." -ForegroundColor Cyan
+Stop-Service -Name SplunkForwarder
+Start-Service -Name SplunkForwarder
+ 
+Start-Sleep -Seconds 5
+ 
+Write-Host "Prüfe Dienststatus..." -ForegroundColor Cyan
+Get-Service -Name SplunkForwarder | Format-Table Name, Status, StartType -AutoSize
+ 
+Write-Host "Fertig. Prüfe zusätzlich im splunkd.log, ob subscribeToEvtChannel-Fehler weiterhin auftreten:" -ForegroundColor Yellow
+Write-Host '  Select-String -Path "C:\Program Files\SplunkUniversalForwarder\var\log\splunk\splunkd.log" -Pattern "subscribeToEvtChannel","errorCode"'
