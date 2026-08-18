@@ -5,17 +5,20 @@ Ein Home Lab zum Üben von Security Monitoring und späteren Angriffssimulatione
 ## Status
 
 - [x] Teil 1: Windows VM mit Sysmon und Splunk
-- [ ] Teil 2: Kali VM, Netzwerk auf Bridged, erste Angriffe
+- [x] Teil 2: Kali VM, Netzwerk auf Bridged, erste Angriffe
+- [ ] Teil 3: weitere Angriffstechniken, Detection Engineering, Dashboards
 
 ## Aufbau
 
 | Komponente | Rolle |
 |---|---|
-| VirtualBox | Virtualisierung |
+| VirtualBox (Windows-PC) | Virtualisierung der Windows-VM |
+| UTM (MacBook, Apple Silicon) | Virtualisierung der Kali-VM |
 | Windows 11 Enterprise (Evaluierung) | Ziel-VM, generiert Events |
 | Sysmon (SwiftOnSecurity-Konfiguration) | Erfasst detaillierte Prozess-, Netzwerk- und Registry-Events |
 | Splunk Universal Forwarder | Sendet Windows- und Sysmon-Logs an Splunk |
 | Splunk Enterprise | Empfängt, indiziert, durchsucht die Logs |
+| Kali Linux | Angreifer-VM, Nmap-Scans und Brute-Force gegen die Windows-VM |
 
 ## Teil 1: Windows VM mit Sysmon und Splunk
 
@@ -80,14 +83,88 @@ Danach liefen alle drei Indizes sauber.
 - `index=_internal host=<hostname>` ist ein guter genereller Test, ob ein Forwarder überhaupt Daten sendet, unabhängig vom eigentlichen Input
 - Der Splunk Forwarder-Dienst braucht ausreichende Rechte, um Security-relevante Windows Event Log Kanäle zu lesen, Local System ist für ein Lab die einfachste Lösung
 
+## Teil 2: Kali VM, Bridged Netzwerk, erste Angriffe
+
+Anders als Teil 1 läuft die Angreifer-VM auf einem separaten Gerät, einem MacBook mit Apple-Silicon-Chip (M2), während die Windows-Ziel-VM weiterhin auf dem PC in VirtualBox läuft. Beide Geräte müssen sich dafür im selben Netzwerk sehen können.
+
+### Was gemacht wurde
+
+1. UTM auf dem MacBook installiert (VirtualBox unterstützt Apple Silicon nur eingeschränkt)
+2. Kali Linux (arm64, native Virtualisierung) heruntergeladen und in UTM installiert
+3. Netzwerkmodus beider VMs von NAT/Shared Network auf Bridged umgestellt, sodass beide eine reguläre IP-Adresse aus dem Heimnetzwerk bekommen
+4. Verbindung zwischen beiden VMs mit `ping` bestätigt
+5. Auf der Windows-VM Remotedesktop (RDP) aktiviert, Netzwerkprofil auf „Privat" gesetzt, damit die zugehörige Firewall-Regel greift
+6. Von Kali aus mit Nmap gescannt (`-Pn`, da Windows ICMP-Pings standardmäßig blockt)
+7. Mit Hydra ein Brute-Force-Test gegen RDP gefahren
+8. Den Angriff in Splunk nachgewiesen, inklusive Zuordnung zur Quell-IP der Kali-VM
+9. Eine einfache Detection-Suche gebaut, die mehrere fehlgeschlagene Logins derselben Quelle zusammenfasst
+
+### Ergebnis
+
+Nmap-Scan gegen die offenen Ports der Windows-VM:
+
+```
+sudo nmap -Pn -sV -p 3389 192.168.0.105
+```
+
+zeigt Port 3389 (RDP) als offen, nachdem Remotedesktop aktiviert wurde.
+
+Brute-Force-Test mit Hydra (Testzweck, absichtlich mit einer kleinen, garantiert falschen Passwortliste):
+
+```
+hydra -l WhiteLotus -P /tmp/passwords.txt rdp://192.168.0.105
+```
+
+Nachweis in Splunk, dass die Versuche als fehlgeschlagene Anmeldungen erfasst wurden, inklusive Quell-IP:
+
+```
+index=security_logs EventCode=4625
+```
+
+Im aufgeklappten Event stehen `Workstation Name: kali` und `Source Network Address: 192.168.0.104`, eindeutig der Kali-VM zugeordnet.
+
+Einfache Detection-Suche, die Brute-Force-Muster (mehrere Fehlversuche derselben Quelle) zusammenfasst:
+
+```
+index=security_logs EventCode=4625
+| stats count by Source_Network_Address, Account_Name
+| where count > 3
+```
+
+### Troubleshooting
+
+**Falsche CPU-Architektur.** Die zuerst heruntergeladene Kali-ISO war für x86_64 (amd64), UTM auf einem M2-Mac benötigt aber nativ arm64. UTM meldete das direkt beim Auswählen des Boot-Images. Für Kali Purple gibt es aktuell offiziell keine arm64-Version, daher fiel die Wahl auf das normale Kali Linux (arm64), das für Angriffe aus diesem Lab ausreicht.
+
+**UEFI-Shell statt Installer.** Nach dem VM-Start landete die VM in einer UEFI Interactive Shell statt im Kali-Bootmenü, weil das Boot-Medium nicht automatisch erkannt wurde. Manuell behoben durch Wechsel auf das CD-Laufwerk und direkten Aufruf der Bootdatei:
+
+```
+FS0:
+cd EFI\Boot
+bootx64.efi
+```
+
+**Nach der Installation Boot-Loop zur Installer-ISO.** Nach abgeschlossener Installation bootete die VM wieder vom Installationsmedium statt von der neuen Festplatte. Grund: die ISO war in UTM noch als Boot-Medium eingelegt. Behoben durch Auswerfen der ISO in den VM-Einstellungen (Drives, „Eject").
+
+**Kali erreicht kein Internet trotz gültiger IP.** `ping` gegen öffentliche IPs (`8.8.8.8`, `1.1.1.1`) schlug mit „Destination Port Unreachable" fehl, obwohl Kali eine gültige IP im UTM-eigenen Shared-Network-Bereich (`192.168.64.x`) hatte und das eigene Gateway erreichbar war. Ursache war ein Netzwerkfilter im umgebenden Netzwerk, der ICMP blockiert; per `curl` (echter TCP/HTTP-Verkehr) funktionierte die Verbindung einwandfrei. Lehre daraus: `ping` ist kein zuverlässiger Konnektivitätstest, viele Netzwerke filtern ICMP, ohne den restlichen Datenverkehr zu blockieren.
+
+**Kein Ping zur Windows-VM.** Nach dem Umstieg auf Bridged Mode erreichte Windows die Kali-VM problemlos, umgekehrt schlug der Ping fehl. Ursache: die Windows-Firewall blockiert eingehende ICMP-Echo-Anfragen standardmäßig, das ist Normalverhalten und musste für dieses Lab nicht behoben werden, da die eigentlichen Angriffstests (Nmap mit `-Pn`, Hydra) ohnehin nicht auf ICMP angewiesen sind.
+
+**RDP-Port bleibt „filtered" trotz aktivierter Firewall-Regel.** Der naheliegende erste Verdacht (Netzwerkprofil „Öffentlich" statt „Privat") stellte sich als falsche Fährte heraus, das Profil stand bereits korrekt auf „Privat". Die eigentliche Ursache: Remotedesktop war in den Windows-Einstellungen schlicht noch nicht aktiviert worden. Nach dem Aktivieren war Port 3389 sofort erreichbar.
+
+### Lessons Learned
+
+- Bei Apple Silicon immer zuerst die passende Architektur (arm64) sicherstellen, bevor an anderen Stellen gesucht wird, viele Folgefehler (UEFI-Shell, „Unsupported"-Fehler beim Booten) gehen auf diese eine Ursache zurück
+- `ping` ist ein schwacher Konnektivitätstest, weil ICMP häufig gefiltert wird, ohne dass echter Datenverkehr (TCP/HTTP) betroffen ist, im Zweifel mit `curl` gegenprüfen
+- Windows blockt eingehende Dienste und ICMP standardmäßig sehr restriktiv, das ist für ein Security-Lab eher hilfreich, weil es reale Bedingungen abbildet
+- Bevor man tief in der Firewall-Konfiguration sucht, erst die einfachste Ursache ausschließen, hier: ist der Dienst (RDP) überhaupt aktiviert
+- Ein einfaches `stats`/`where`-Muster in Splunk reicht bereits aus, um Brute-Force-Versuche sichtbar zu machen, ganz ohne fertige Regelwerke
+
 ## Screenshots
 
-<img width="767" height="587" alt="image" src="https://github.com/user-attachments/assets/c1014264-f9fe-4701-936f-351101496390" />
+*(Screenshots aus Splunk hier einfügen, z. B. Suchergebnis für `index=security_logs EventCode=4625`, Nmap- und Hydra-Ausgabe aus Kali, die Detection-Suche mit `stats`, Ereignisanzeige mit Sysmon-Events, VirtualBox- und UTM-Snapshot-Übersicht)*
 
+## Nächste Schritte (Teil 3)
 
-## Nächste Schritte (Teil 2)
-
-- Kali VM auf dem MacBook einrichten
-- Netzwerk beider VMs auf Bridged umstellen
-- Erste Angriffe von Kali gegen die Windows-VM fahren (z. B. Brute-Force, Nmap-Scan)
-- Erkennung der Angriffe in Splunk nachweisen und dokumentieren
+- Weitere Angriffstechniken ausprobieren (z. B. SMB-Enumeration, Mimikatz-artige Credential-Angriffe im Lab-Kontext)
+- Eigene Detection-Regeln als gespeicherte Splunk-Alerts anlegen
+- Ein einfaches Dashboard in Splunk bauen, das die wichtigsten Kennzahlen (fehlgeschlagene Logins, Sysmon-Prozessstarts, Netzwerkverbindungen) auf einen Blick zeigt
