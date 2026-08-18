@@ -6,7 +6,6 @@ Ein Home Lab zum Üben von Security Monitoring und späteren Angriffssimulatione
 
 - [x] Teil 1: Windows VM mit Sysmon und Splunk
 - [x] Teil 2: Kali VM, Netzwerk auf Bridged, erste Angriffe
-- [ ] Teil 3: weitere Angriffstechniken, Detection Engineering, Dashboards
 
 ## Aufbau
 
