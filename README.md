@@ -160,10 +160,16 @@ bootx64.efi
 
 ## Screenshots
 
-*(Screenshots aus Splunk hier einfügen, z. B. Suchergebnis für `index=security_logs EventCode=4625`, Nmap- und Hydra-Ausgabe aus Kali, die Detection-Suche mit `stats`, Ereignisanzeige mit Sysmon-Events, VirtualBox- und UTM-Snapshot-Übersicht)*
+<img width="555" height="283" alt="image" src="https://github.com/user-attachments/assets/ddd89796-b03e-4c8a-9eb2-2ee7c967a95e" />
+<img width="1300" height="626" alt="image" src="https://github.com/user-attachments/assets/97f18530-b124-482b-a28a-7b50e600c309" />
+<img width="1412" height="862" alt="image" src="https://github.com/user-attachments/assets/5ceb0b98-db78-46e9-ac6f-784f44d4d4a9" />
+<img width="1478" height="926" alt="image" src="https://github.com/user-attachments/assets/7b5edf27-8713-4700-be96-66cde3342c40" />
+<img width="957" height="708" alt="image" src="https://github.com/user-attachments/assets/0af9455c-1b3b-42d0-90e8-692b40d278bb" />
+<img width="437" height="598" alt="image" src="https://github.com/user-attachments/assets/19f7a1a1-9d77-40c8-9c2c-aa69cea215e7" />
+<img width="975" height="692" alt="image" src="https://github.com/user-attachments/assets/3b393d97-6bc0-4ae3-a22a-0a079476d9cf" />
 
-## Nächste Schritte (Teil 3)
 
-- Weitere Angriffstechniken ausprobieren (z. B. SMB-Enumeration, Mimikatz-artige Credential-Angriffe im Lab-Kontext)
-- Eigene Detection-Regeln als gespeicherte Splunk-Alerts anlegen
-- Ein einfaches Dashboard in Splunk bauen, das die wichtigsten Kennzahlen (fehlgeschlagene Logins, Sysmon-Prozessstarts, Netzwerkverbindungen) auf einen Blick zeigt
+
+
+
+
